@@ -1,28 +1,16 @@
 import logfire
-from langchain_groq import ChatGroq
-
 from app.agents.state import AgentState
-from app.config import settings
-
-
-# Direct Groq LLM (no Portkey)
-llm = ChatGroq(
-    api_key=settings.GROQ_API_KEY,
-    model=settings.GROQ_MODEL,
-    temperature=0.1,
-)
+from app.gateway import portkey_client, extract_cache_status
 
 
 def generate_node(state: AgentState):
     """
-    Generates the final response using either:
-    1. Conversation history (for conversational queries), or
-    2. Retrieved documentation + conversation history (for RAG queries).
+    Synthesizes a response using both Documentation Context AND Conversation History.
+    Uses the native Portkey client (not LangChain) so we can read the
+    x-portkey-cache-status response header and surface Cache: Hit in the UI.
     """
-
     query = state["current_query"]
 
-    # Build conversation history
     history_str = ""
     for msg in state["messages"][:-1]:
         role = "User" if msg["role"] == "user" else "Assistant"
@@ -32,22 +20,18 @@ def generate_node(state: AgentState):
 
     if query == "CONVERSATIONAL":
         logfire.info("Generating conversational response using memory.")
-
         prompt = f"""
-You are a friendly and helpful Enterprise AI Assistant.
+        You are a friendly and helpful Enterprise AI Assistant.
+        Answer the user's latest message using the CONVERSATION HISTORY below.
 
-Use the conversation history to answer the user's latest message naturally.
+        CONVERSATION HISTORY:
+        {history_str}
 
-CONVERSATION HISTORY:
-{history_str}
-
-LATEST MESSAGE:
-{user_msg}
-"""
-
+        LATEST MESSAGE:
+        "{user_msg}"
+        """
     else:
         logfire.info("Generating technical RAG response.")
-
         max_context_chars = 25000
         full_context = ""
 
@@ -59,40 +43,45 @@ LATEST MESSAGE:
                 break
 
         prompt = f"""
-You are a Senior Technical Architect.
+        You are a Senior Technical Architect.
+        Answer the question using the TECHNICAL CONTEXT provided.
 
-Answer the user's question ONLY using the technical context provided.
-If the answer is not available in the context, clearly say you don't have enough information.
+        TECHNICAL CONTEXT:
+        {full_context}
 
-TECHNICAL CONTEXT:
-{full_context}
+        CONVERSATION HISTORY:
+        {history_str}
 
-CONVERSATION HISTORY:
-{history_str}
-
-USER QUESTION:
-{user_msg}
-"""
+        USER QUESTION:
+        "{user_msg}"
+        """
 
     with logfire.span("✍️ LLM Synthesis"):
         try:
-            response = llm.invoke(prompt)
-            content = response.content
+            response = portkey_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1
+            )
+            content = response.choices[0].message.content
+            cache_status = extract_cache_status(response)
+            is_cache_hit = cache_status == "HIT"
 
-            logfire.info("✅ Response synthesized successfully.")
+            if is_cache_hit:
+                logfire.info("⚡ Gateway Cache Hit — response served from Portkey cache.")
+                plan_update = state["plan"] + ["Cache: Hit ⚡"]
+                status = "Cache hit — instant response."
+            else:
+                logfire.info("✅ Response synthesised via LLM.")
+                plan_update = state["plan"]
+                status = "Response generated."
 
             return {
                 "final_answer": content,
-                "status": "Response generated.",
-                "plan": state["plan"],
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": content,
-                    }
-                ],
+                "status": status,
+                "plan": plan_update,
+                "messages": [{"role": "assistant", "content": content}]
             }
 
         except Exception as e:
             logfire.error(f"LLM Generation failed: {e}")
-            raise
+            raise e
