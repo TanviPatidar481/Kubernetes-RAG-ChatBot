@@ -20,6 +20,17 @@ def retrieve_node(state: AgentState):
         
         with logfire.span("⚖️ Semantic Reranking"):
             reranked_contents = rerank_documents(query, doc_contents, top_n=5)
+            print("\n================ RAW RESULTS ================\n")
+            for i, doc in enumerate(raw_results, 1):
+                print(f"[RAW {i}] score={doc['score']:.4f} source={doc['source']}")
+                print(doc["content"][:500])
+                print("-" * 80)
+
+            print("\n================ RERANKED RESULTS ================\n")
+            for i, doc in enumerate(reranked_contents, 1):
+                print(f"[RERANK {i}]")
+                print(doc[:500])
+                print("-" * 80)
             logfire.info("Reranking complete. Kept top 5 most relevant chunks.")
             
         formatted_docs = [f"CONTENT: {doc}" for doc in reranked_contents]
