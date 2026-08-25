@@ -41,7 +41,7 @@ def run_guardrails_eval(guardrails_samples: list, progress_callback=None) -> lis
                     resp = requests.post(
                         API_URL,
                         json={"q": sample["input"], "thread_id": f"guardrail_eval_{i}"},
-                        timeout=30,
+                        timeout=120,
                     )
                     resp.raise_for_status()
                     blocked = _is_blocked(resp.json())

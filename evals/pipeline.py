@@ -14,7 +14,7 @@ import requests
 import logfire
 
 API_URL = "http://localhost:8000/query"
-RESPONSE_TRUNCATE = 300
+# RESPONSE_TRUNCATE = 300
 DELAY_BETWEEN_CALLS = 10   # seconds — stays within Groq RPM on the main key
 REQUEST_TIMEOUT = 120      # seconds — guardrails + LangGraph + Groq can take >60s
 
@@ -73,7 +73,8 @@ def run_pipeline(golden_dataset: dict, progress_callback=None) -> dict:
                     thought_process = data.get("thought_process") or []
                     sources = data.get("sources") or []
 
-                    sample["actual_response"] = raw_answer
+                    sample["actual_response"] = raw_answer or ""
+                    # sample["actual_response"] = (raw_answer or "")[:RESPONSE_TRUNCATE]
                     sample["actual_contexts"] = sources[:5]
                     sample["actual_tools_called"] = [detect_tool(thought_process)]
 

@@ -6,7 +6,11 @@ load_dotenv()
 
 class Settings:
     # --- GEMINI EMBEDDINGS ---
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # backward-compat alias (used by eval judge fallback)
+    GEMINI_API_KEY_PRIMARY = (
+        os.getenv("GEMINI_API_KEY_PRIMARY") or os.getenv("GEMINI_API_KEY")
+    )
+    GEMINI_API_KEY_SECONDARY = os.getenv("GEMINI_API_KEY_SECONDARY")
 
     # --- VECTOR DB (QDRANT) ---
     QDRANT_URL = os.getenv("QDRANT_CLUSTER_ENDPOINT")
@@ -15,13 +19,13 @@ class Settings:
 
     # --- REASONING ENGINE (GROQ) ---
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    GROQ_MODEL = "llama-3.3-70b-versatile"
+    GROQ_MODEL = "openai/gpt-oss-120b"
     GROQ_FALLBACK_API_KEY = os.getenv("GROQ_FALLBACK_API_KEY")
 
     # --- LLM GATEWAY (PORTKEY) ---
     PORTKEY_API_KEY = os.getenv("PORTKEY_API_KEY")
-    GROQ_SLUG =  "rag"     # primary: @rag/llama-3.3-70b-versatile
-    GROQ_SLUG_2 = "brag"  # fallback: @brag/llama-3.1-8b-instant
+    GROQ_SLUG =  "rag"     # primary: @rag/openai/gpt-oss-120b
+    GROQ_SLUG_2 = "brag"  # fallback: @brag/openai/gpt-oss-20b
 
     
     # --- OBSERVABILITY ---

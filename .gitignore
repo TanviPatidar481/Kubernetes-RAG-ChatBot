@@ -40,6 +40,7 @@ wheels/
 # Generated Data
 # ============================================
 processed_data/
+evals/enriched_dataset.json
 
 # ============================================
 # Local Vector Store (for FAISS projects)
@@ -88,3 +89,17 @@ htmlcov/
 # ============================================
 enterprise_env/
 commands.md
+
+# ============================================
+# Enterprise Documents
+# ============================================
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+
+# ============================================
+# Backup / Temporary Files
+# ============================================
+ui/app.py.bak
+temp_true/

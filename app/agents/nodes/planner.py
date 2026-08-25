@@ -28,9 +28,9 @@ def planner_node(state: AgentState):
     "{user_message}"
     
     Task:
-    1. If the latest message is a greeting (hi, hello) or a question that can be answered using ONLY the conversation history above (e.g., "what is my name"), respond with 'CONVERSATIONAL'.
-    2. If it is a technical question about Kubernetes, Intel, or Networking that requires fresh documentation, output a refined search query.
-    
+    1. Respond with 'CONVERSATIONAL' ONLY if the latest message is a genuine greeting (hi, hello) or can be fully answered using ONLY the conversation history above (e.g., "what is my name").
+    2. For ANY other informational or technical question — on any topic whatsoever — output a refined search query.
+
     Output ONLY 'CONVERSATIONAL' or the search query.
     """
     
@@ -38,7 +38,7 @@ def planner_node(state: AgentState):
         decision = llm.invoke(prompt).content.strip()
         logfire.info(f"Intent identified: {decision}")
     
-    if decision == "CONVERSATIONAL":
+    if "CONVERSATIONAL" in decision.upper():
         return {
             "current_query": "CONVERSATIONAL",
             "status": "Handling conversationally (using memory)...",

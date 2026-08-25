@@ -1,11 +1,14 @@
 import logfire
 from app.agents.state import AgentState
 from app.services.retrieval.qdrant_service import search_enterprise_knowledge
-from app.services.retrieval.ranking_service import rerank_documents
+from app.services.retrieval.ranking_service import (
+    rerank_documents,
+    deduplicate_documents,
+)
 
 def retrieve_node(state: AgentState):
     """
-    Performs vector search and semantic reranking for technical queries.
+    Performs vector search, exact-content deduplication, and semantic reranking for technical queries.
     """
     query = state["current_query"]
     
@@ -15,6 +18,17 @@ def retrieve_node(state: AgentState):
         logfire.info(f"Searching Qdrant for: {query}")
         raw_results = search_enterprise_knowledge(query, limit=15)
         logfire.info(f"Retrieved {len(raw_results)} candidates from Vector DB")
+        
+        # --- Exact-content deduplication BEFORE reranking ---
+        # Keeps the first (best-scoring) occurrence of duplicate content and its
+        # metadata; different chunks from the same source are preserved.
+        before_dedup = len(raw_results)
+        unique_results, removed = deduplicate_documents(raw_results)
+        logfire.info(
+            f"♻️ Dedup: {before_dedup} candidates before, {removed} duplicates removed, "
+            f"{len(unique_results)} candidates passing to reranker."
+        )
+        raw_results = unique_results
         
         doc_contents = [doc['content'] for doc in raw_results]
         

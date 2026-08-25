@@ -4,92 +4,145 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from app.config import settings
 
 BATCH_SIZE = 50
-_GEMINI_DIM = 3072
-_FALLBACK_DIM = 768  # all-mpnet-base-v2
+GEMINI_MODEL = "models/gemini-embedding-2-preview"
+GEMINI_DIM = 3072
 
-_active_model = None
-_model_type: str | None = None  # "gemini" or "fallback"
+# Ordered list of (label, embedder) — one per API key. Every key uses the SAME
+# Gemini model, so vectors are always 3072-dim and the locked Qdrant collection
+# is never incompatible. There is deliberately NO 768-dim sentence-transformers
+# fallback in the production embedding path.
+_embedders: list[tuple[str, "GoogleGenerativeAIEmbeddings"]] = []
+_sticky_index = 0
 
 
 # ── Model initialisation ───────────────────────────────────────────────────────
 
-def _probe_gemini():
-    """Try one embed call to verify Gemini is reachable. Returns model or None."""
-    try:
-        model = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-2-preview",
-            google_api_key=settings.GEMINI_API_KEY,
+def _is_transient(exc: Exception) -> bool:
+    """Return True only for transient/retryable API errors (429/503/rate/quota/timeout)."""
+    err = str(exc).lower()
+    return any(
+        marker in err
+        for marker in (
+            "429", "503", "rate", "quota", "resource_exhausted",
+            "unavailable", "temporarily", "timeout", "connection",
         )
-        model.embed_query("probe")
-        logfire.info("Gemini embeddings ready (gemini-embedding-2-preview, 3072-dim).")
-        return model
-    except Exception as e:
-        logfire.warning(f"Gemini probe failed: {e}. Will use sentence-transformers fallback.")
-        return None
-
-
-def _load_fallback():
-    from sentence_transformers import SentenceTransformer
-    logfire.info("Loading sentence-transformers fallback (all-mpnet-base-v2, 768-dim).")
-    return SentenceTransformer("all-mpnet-base-v2")
+    )
 
 
 def _init():
-    """Initialise embedding model once per process. Called lazily on first use."""
-    global _active_model, _model_type
-    if _active_model is not None:
+    """
+    Build the key-rotation embedding list once per process (lazy).
+
+    Both configured keys use the SAME Gemini embedding model, so every vector is
+    3072-dimensional and remains compatible with the existing Qdrant collection.
+    There is deliberately no 768-dim sentence-transformers fallback.
+    """
+    global _embedders
+    if _embedders:
         return
 
-    gemini = _probe_gemini()
-    if gemini:
-        _active_model = gemini
-        _model_type = "gemini"
-    else:
-        _active_model = _load_fallback()
-        _model_type = "fallback"
+    primary = settings.GEMINI_API_KEY_PRIMARY or settings.GEMINI_API_KEY
+    secondary = settings.GEMINI_API_KEY_SECONDARY
+
+    candidates = [("primary", primary)]
+    if secondary:
+        candidates.append(("secondary", secondary))
+
+    embedders = []
+    for label, key in candidates:
+        if not key:
+            continue
+        embedders.append(
+            (
+                label,
+                GoogleGenerativeAIEmbeddings(
+                    model="models/gemini-embedding-2-preview",
+                    google_api_key=key,
+                ),
+            )
+        )
+
+    if not embedders:
+        raise ValueError(
+            "No Gemini embedding key configured. Set GEMINI_API_KEY_PRIMARY "
+            "(or GEMINI_API_KEY / GEMINI_API_KEY_SECONDARY) in the environment."
+        )
+
+    _embedders[:] = embedders
+    logfire.info(
+        f"Gemini embeddings ready: models/gemini-embedding-2-preview, "
+        f"{GEMINI_DIM}-dim, {len(_embedders)} key(s) for rotation."
+    )
+
+
+def _rotate(embed_fn):
+    """
+    Bounded key-rotation / failover loop. Tries the last-known-good key first.
+
+    - Transient errors (429/503/rate/quota/timeout/connection) rotate to the
+      next key immediately.
+    - Permanent errors (invalid key / 400 / 403) raise immediately.
+    - After 3 rounds across all keys, raise a clear error.
+    - Never returns an empty vector; never downgrades to a 768-dim model.
+    """
+    global _sticky_index
+    errors: list[str] = []
+
+    for attempt in range(3):
+        for offset in range(len(_embedders)):
+            idx = (_sticky_index + offset) % len(_embedders)
+            label, model = _embedders[idx]
+            try:
+                result = embed_fn(model)
+                _sticky_index = idx  # stick to the key that just worked
+                if offset > 0:
+                    logfire.info(f"Gemini key rotation: failover to [{label}] succeeded.")
+                return result
+            except Exception as e:
+                if not _is_transient(e):
+                    logfire.error(f"Gemini [{label}] permanent error: {e}")
+                    raise
+                logfire.warning(f"Gemini [{label}] transient failure ({e}); trying next key.")
+                errors.append(f"{label}: {type(e).__name__}")
+
+        wait = 2 ** attempt
+        logfire.warning(
+            f"All {len(_embedders)} Gemini key(s) failed this round ({errors[-2:]}); "
+            f"backing off {wait}s."
+        )
+        if attempt < 2:
+            time.sleep(wait)
+
+    raise RuntimeError(
+        f"Gemini embedding failed after {len(_embedders)} key(s) × 3 rounds: {errors}"
+    )
 
 
 # ── Public helpers ─────────────────────────────────────────────────────────────
 
 def get_embedding_dim() -> int:
-    """Return the vector dimension for the active model. Call after _init()."""
-    _init()
-    return _GEMINI_DIM if _model_type == "gemini" else _FALLBACK_DIM
+    """Qdrant is locked at 3072 dimensions — always return GEMINI_DIM."""
+    return GEMINI_DIM
 
 
-# ── Batch embedding with retry ─────────────────────────────────────────────────
+# ── Batch embedding (key rotation) ────────────────────────────────────────────────
 
 def _embed_batch(batch: list[str]) -> list[list[float]]:
-    if _model_type == "gemini":
-        # Exponential backoff: 1 s → 2 s → 4 s → 8 s (4 attempts total)
-        for attempt in range(4):
-            try:
-                return _active_model.embed_documents(batch)
-            except Exception as e:
-                err = str(e).lower()
-                is_rate_limit = any(x in err for x in ("429", "rate", "quota", "resource_exhausted"))
-                if is_rate_limit and attempt < 3:
-                    wait = 2 ** attempt
-                    logfire.warning(
-                        f"Gemini rate limit hit — retrying in {wait}s "
-                        f"(attempt {attempt + 1}/4)."
-                    )
-                    time.sleep(wait)
-                else:
-                    logfire.error(f"Gemini embedding failed: {e}")
-                    raise
-        raise RuntimeError("Gemini rate limit persisted after 4 attempts.")
-    else:
-        return _active_model.encode(batch, show_progress_bar=False).tolist()
+    _init()
+    return _rotate(lambda model: model.embed_documents(batch))
 
 
-# ── Public API (same signatures as before) ─────────────────────────────────────
+# ── Public API (same signatures as before) ────────────────────────────────────
 
 def embed_query(query: str) -> list[float]:
+    """Embed a single query with bounded key rotation / failover.
+
+    Returns a 3072-dim vector. Raises on permanent errors and after all keys
+    fail; never returns an empty vector and never downgrades to a 768-dim
+    sentence-transformers model.
+    """
     _init()
-    if _model_type == "gemini":
-        return _active_model.embed_query(query)
-    return _active_model.encode([query])[0].tolist()
+    return _rotate(lambda model: model.embed_query(query))
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
@@ -97,6 +150,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     all_embeddings: list[list[float]] = []
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i : i + BATCH_SIZE]
-        with logfire.span("Embed batch", model=_model_type, start=i, size=len(batch)):
+        with logfire.span("Embed batch", model="gemini-embedding-2-preview", start=i, size=len(batch)):
             all_embeddings.extend(_embed_batch(batch))
     return all_embeddings

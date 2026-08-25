@@ -36,6 +36,15 @@ def home():
     return {"message": "Enterprise LangGraph RAG API is live."}
 
 
+@app.get("/health")
+def health():
+    """
+    Liveness/readiness probe for orchestrators / load balancers.
+    Returns HTTP 200 with a healthy status.
+    """
+    return {"status": "ok"}
+
+
 @app.get("/graph")
 def get_graph_image():
     """
