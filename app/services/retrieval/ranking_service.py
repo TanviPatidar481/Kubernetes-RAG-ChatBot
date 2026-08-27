@@ -1,12 +1,18 @@
 import time
-import logfire
-from flashrank import Ranker, RerankRequest
 
-# Conservative FlashRank relevance floor. Candidate chunks scoring below this
-# threshold are NOT handed to the responder. This filters obvious noise on
-# weak / off-topic queries — it deliberately never refuses or blocks a
-# question: the responder always answers (with less, or even no, context).
-# Tune only after reviewing Logfire's "[Reranker] Top semantic score" logs.
+import logfire
+import requests
+
+from app.config import settings
+
+# Relevance floor applied to Jina's relevance_score (0–1 scale). Candidate
+# chunks scoring below this threshold are NOT handed to the responder. This
+# filters obvious noise on weak / off-topic queries — it deliberately never
+# refuses or blocks a question: the responder always answers (with less, or
+# even no, context).
+#
+# NOTE: recalibrate after the first live runs — Jina's score distribution
+# differs from FlashRank's. Watch Logfire's "[Reranker]" logs and adjust.
 RELEVANCE_FLOOR = 0.1
 
 
@@ -52,73 +58,71 @@ def deduplicate_documents(documents: list[dict]) -> tuple[list[dict], int]:
     return deduped, removed
 
 
-# Lazy initialization - Ranker is loaded on first use to ensure logfire.configure() has run
-_ranker = None
-
-
-def _get_ranker() -> Ranker:
-    """
-    Initializes the FlashRank engine lazily. 
-    FlashRank uses a local ONNX model (ms-marco-MiniLM-L-6-v2) for ultra-fast reranking.
-    """
-    global _ranker
-    if _ranker is None:
-        logfire.info("🧠 Initializing FlashRank Model (TinyBERT) locally...")
-        try:
-            # We use a specific cache directory to avoid permission issues in production
-            _ranker = Ranker(cache_dir="/tmp/flashrank")
-        except Exception:
-            _ranker = Ranker()
-    return _ranker
-
-
-
 def rerank_documents(query: str, documents: list[str], top_n: int = 5) -> list[str]:
     """
-    Refines retrieval results by re-scoring documents against the query semantically.
-    
-    Why FlashRank? 
-    Standard vector search (Cosine Similarity) is fast but mathematically "fuzzy."
-    FlashRank uses a Cross-Encoder approach which is much more precise but usually slow.
-    FlashRank solves this by using highly optimized, quantized ONNX models locally.
+    Refines retrieval results by re-scoring documents against the query
+    semantically using the Jina Reranker API (hosted cross-encoder).
+
+    Why hosted instead of local ONNX?
+    Standard vector search (Cosine Similarity) is fast but mathematically
+    "fuzzy." A cross-encoder is far more precise — but running it locally via
+    FlashRank loaded model weights + an ONNX runtime session into our process
+    (~250–300 MB at peak). Delegating to Jina removes that entire footprint
+    while keeping the same ranking quality contract: results come back sorted
+    best-first, ready for the relevance-floor filter.
     """
     if not documents:
         return []
 
     start_time = time.time()
-    logfire.info(f"📡 [Reranker] Sending {len(documents)} docs to FlashRank Cross-Encoder...")
+    logfire.info(f"📡 [Reranker] Sending {len(documents)} docs to Jina Reranker...")
 
     try:
-        ranker = _get_ranker()
-        
-        # FlashRank expects a list of dictionaries with 'id' and 'text'
-        passages = [
-            {"id": i, "text": doc}
-            for i, doc in enumerate(documents)
-        ]
+        api_key = settings.JINA_API_KEY
+        if not api_key:
+            raise ValueError("JINA_API_KEY is not configured")
 
-        request = RerankRequest(query=query, passages=passages)
-        results = ranker.rerank(request)
-        
-        # Results are returned sorted by highest semantic score first.
+        response = requests.post(
+            "https://api.jina.ai/v1/rerank",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "jina-reranker-v2-base-multilingual",
+                "query": query,
+                "documents": documents,
+                "top_n": min(top_n, len(documents)),
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        # Results arrive sorted best-first; each entry maps back into our
+        # input order via 'index'.
+        scored: list[tuple[str, float]] = []
+        for hit in payload.get("results", []):
+            idx = hit.get("index")
+            if isinstance(idx, int) and 0 <= idx < len(documents):
+                scored.append((documents[idx], float(hit.get("relevance_score", 0.0))))
+
         # Relevance floor: keep only chunks scoring at least RELEVANCE_FLOOR,
         # so weak queries return FEWER chunks (possibly none) instead of
-        # forcing exactly 5 marginally-related ones onto the responder.
+        # forcing exactly `top_n` marginally-related ones onto the responder.
         # This is a context-quality filter only — never an out-of-scope
         # refusal mechanism.
-        candidates = results[:top_n]
-        reranked_docs = [
-            res['text'] for res in candidates
-            if res['score'] >= RELEVANCE_FLOOR
-        ]
+        reranked_docs = [text for text, score in scored if score >= RELEVANCE_FLOOR]
 
         duration = time.time() - start_time
-        top_score = results[0]['score'] if results else 'N/A'
-        logfire.info(f"✅ [Reranker] Done in {duration:.2f}s. Top semantic score: {top_score}")
-        if len(reranked_docs) < len(candidates):
+        top_score = scored[0][1] if scored else "N/A"
+        logfire.info(
+            f"✅ [Reranker] Done in {duration:.2f}s. Top semantic score: {top_score}"
+        )
+        if len(reranked_docs) < len(scored):
             logfire.info(
                 f"🎚️ [Reranker] Relevance floor {RELEVANCE_FLOOR}: kept "
-                f"{len(reranked_docs)}/{len(candidates)} candidate chunk(s)."
+                f"{len(reranked_docs)}/{len(scored)} candidate chunk(s)."
             )
 
         return reranked_docs

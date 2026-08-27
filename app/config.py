@@ -27,6 +27,9 @@ class Settings:
     GROQ_SLUG =  "rag"     # primary: @rag/openai/gpt-oss-120b
     GROQ_SLUG_2 = "brag"  # fallback: @brag/openai/gpt-oss-20b
 
+    # --- RERANKER API (JINA) ---
+    JINA_API_KEY = os.getenv("JINA_API_KEY")
+
     
     # --- OBSERVABILITY ---
     LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true")

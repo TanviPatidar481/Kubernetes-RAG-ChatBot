@@ -43,16 +43,15 @@ def generate_node(state: AgentState):
                 break
 
         prompt = f"""
-        You are a precise and helpful technical assistant.
+        You are a precise technical assistant.
 
-        Use the TECHNICAL CONTEXT below whenever it is relevant to the
-        user's question. Prefer information from the provided documentation
-        when it answers the question.
+        Answer the user's question using ONLY the TECHNICAL CONTEXT below.
+        Base every claim strictly on the provided documentation — do not rely
+        on general knowledge and do not speculate. If the context does not
+        contain enough to answer, say so in one sentence rather than guessing.
 
-        If the context does not fully cover the question, you may use your
-        general technical knowledge to provide a helpful answer. Do not
-        invent facts about the user's specific environment, configuration,
-        or organization that are not supported by the context.
+        Keep the answer DIRECT and CONCISE. Include the exact commands, flags,
+        field names, and values from the context that answer the question.
 
         TECHNICAL CONTEXT:
         {full_context}

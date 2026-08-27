@@ -402,7 +402,7 @@ async def run_all_metrics(golden_dataset: dict, status_cb=None) -> dict:
 
         await _cooldown(COOLDOWN_STANDARD, "Answer Relevancy", status_cb)
 
-        Exp 3 — Context Precision
+        # Exp 3 — Context Precision
         with logfire.span("Exp 3 — Context Precision"):
             ctx_samples, n_skipped = _samples_with_contexts(
                 samples, "Exp 3 — Context Precision"
