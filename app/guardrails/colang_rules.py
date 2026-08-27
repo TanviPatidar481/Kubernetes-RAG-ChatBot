@@ -105,6 +105,9 @@ models:
   - type: main
     engine: openai
     model: gpt-3.5-turbo
+  - type: embeddings
+    engine: google
+    model: models/gemini-embedding-2-preview
 
 instructions:
   - type: general
