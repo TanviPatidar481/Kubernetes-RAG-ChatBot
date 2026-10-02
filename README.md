@@ -1,304 +1,111 @@
 # Kub-Bot --- Agentic RAG Assistant
 
-> An advanced Retrieval-Augmented Generation (RAG) application built
-> with FastAPI, LangGraph, Qdrant, Gemini Embeddings, Jina Reranker,
-> NVIDIA NeMo Guardrails, and Portkey.
+A domain-specific Retrieval-Augmented Generation (RAG) application built
+with **FastAPI, LangGraph, Qdrant, Gemini Embeddings, Jina Reranker,
+NeMo Guardrails, and Portkey**.
 
-Kub-Bot is a multi-stage RAG system designed to retrieve relevant
-information from a domain-specific knowledge base and generate
-context-grounded responses. The application combines stateful workflow
-orchestration, conversational memory, authentication, reranking, LLM
-fallback handling, observability, evaluation, and cloud deployment.
+Kub-Bot retrieves and reranks relevant knowledge-base content before
+generating context-grounded answers. It combines conversational memory,
+authentication, LLM reliability controls, observability, and RAG
+evaluation in one application.
 
-[Live API](https://kubernetes-rag-chatbot.onrender.com/) · [Web
-Interface](https://kub-bot-ui.onrender.com/) · [Source
-Code](https://github.com/TanviPatidar481/Kubernetes-RAG-ChatBot)
-
-------------------------------------------------------------------------
-
-## Highlights
-
--   Agentic RAG workflow orchestrated with LangGraph.
--   Semantic retrieval using Gemini Embeddings and Qdrant.
--   Two-stage retrieval with deduplication and Jina reranking.
--   Conversational memory for multi-turn interactions.
--   LLM routing, fallback handling, and caching through Portkey.
--   NVIDIA NeMo Guardrails for controlled LLM interactions.
--   Clerk/JWT authentication for protected API operations.
--   LangSmith and Logfire for tracing and observability.
--   RAGAS evaluation across retrieval and generation metrics.
--   Dockerized deployment with a FastAPI backend and Streamlit UI.
+**[Live API](https://kubernetes-rag-chatbot.onrender.com/)** · **[Web
+Interface](https://kub-bot-ui.onrender.com/)** · **[GitHub
+Repository](https://github.com/TanviPatidar481/Kubernetes-RAG-ChatBot)**
 
 ------------------------------------------------------------------------
+
+## Features
+
+-   **Agentic workflow:** Stateful RAG orchestration with LangGraph.
+-   **Semantic retrieval:** Gemini embeddings with Qdrant vector search.
+-   **Reranking:** Deduplication and Jina reranking to refine retrieved
+    results.
+-   **Conversational memory:** Context-aware multi-turn interactions.
+-   **LLM reliability:** Portkey routing, fallback handling, and
+    caching.
+-   **Guardrails:** NVIDIA NeMo Guardrails for controlled model
+    interactions.
+-   **Authentication:** Clerk/JWT-protected API operations.
+-   **Observability:** LangSmith tracing and Logfire application
+    monitoring.
+-   **Evaluation:** RAGAS metrics for retrieval and generation quality.
 
 ## Architecture
 
 ``` text
-                         +--------------------+
-                         |     Streamlit UI   |
-                         +---------+----------+
-                                   |
-                                   v
-                         +--------------------+
-                         |      FastAPI       |
-                         |    Clerk / JWT     |
-                         +---------+----------+
-                                   |
-                                   v
-                         +--------------------+
-                         |     LangGraph      |
-                         |  Stateful Workflow |
-                         +---------+----------+
-                                   |
-                    +--------------+--------------+
-                    |                             |
-                    v                             v
-           +-----------------+          +-----------------+
-           |    Retrieval    |          |    LLM Layer    |
-           +-----------------+          +-----------------+
-           | Gemini Embedding|          | Portkey         |
-           | Qdrant          |          | LLM Provider    |
-           | Deduplication   |          | NeMo Guardrails |
-           | Jina Reranker   |          +-----------------+
-           +--------+--------+
-                    |
-                    v
-           +-----------------+
-           | Context + Prompt|
-           +--------+--------+
-                    |
-                    v
-           +-----------------+
-           | Final Response  |
-           +-----------------+
+                 User / Streamlit UI
+                         |
+                         v
+                    FastAPI API
+                  (Clerk / JWT)
+                         |
+                         v
+                   LangGraph Flow
+                         |
+              +----------+----------+
+              |                     |
+              v                     v
+         Retrieval               LLM Layer
+              |                     |
+        Gemini Embeddings         Portkey
+              |                     |
+           Qdrant              LLM Provider
+              |                     |
+        Deduplication          NeMo Guardrails
+              |
+        Jina Reranker
+              |
+              v
+       Context + Prompt
+              |
+              v
+       Grounded Response
 
        Observability: LangSmith + Logfire
-       Evaluation:    RAGAS
+       Evaluation: RAGAS
 ```
 
-### RAG Pipeline
-
-Kub-Bot extends the traditional RAG flow:
-
-``` text
-Query → Embedding → Vector Search → Context → LLM → Answer
-```
-
-into a multi-stage workflow:
+### Retrieval Pipeline
 
 ``` text
 User Query
-    |
-    v
-Authentication
-    |
-    v
-Conversation Context
-    |
-    v
-Gemini Embedding
-    |
-    v
-Qdrant Vector Search
-    |
-    v
-Candidate Documents
-    |
-    v
-Deduplication
-    |
-    v
-Jina Reranking
-    |
-    v
-Relevant Context
-    |
-    v
-LangGraph Generation Workflow
-    |
-    v
-LLM
-    |
-    v
-NeMo Guardrails
-    |
-    v
-Final Response
+   → Conversation Context
+   → Gemini Embedding
+   → Qdrant Vector Search
+   → Candidate Deduplication
+   → Jina Reranking
+   → Context Assembly
+   → LLM Generation
+   → NeMo Guardrails
+   → Final Response
 ```
-
-This separates candidate retrieval from fine-grained relevance ranking
-before generation.
-
-------------------------------------------------------------------------
-
-## Retrieval
-
-### Gemini Embeddings
-
-User queries are converted into vector representations using:
-
-  Setting       Value
-  ------------- ------------------------------
-  Model         `gemini-embedding-2-preview`
-  Vector size   `3072`
-
-### Qdrant
-
-The generated embeddings are searched against the Qdrant collection:
-
-``` text
-enterprise_rag_v2
-```
-
-### Jina Reranker
-
-Retrieved candidates are deduplicated and then reranked using:
-
-``` text
-Jina Reranker v2 — Base Multilingual
-```
-
-This provides a second-stage relevance refinement after vector
-similarity search.
-
-------------------------------------------------------------------------
-
-## Conversational Memory
-
-Kub-Bot maintains conversational context to support multi-turn
-interactions.
-
-**Example:**
-
-``` text
-User:      What is Kubernetes?
-
-Assistant: Kubernetes is ...
-
-User:      What are its main components?
-
-Assistant: The main components are ...
-```
-
-The second query can be interpreted using the preceding conversation
-rather than being treated as an isolated request.
-
-------------------------------------------------------------------------
-
-## Guardrails and Reliability
-
-### NVIDIA NeMo Guardrails
-
-NVIDIA NeMo Guardrails is integrated as a control layer for LLM
-interactions.
-
-### Portkey
-
-Portkey provides infrastructure for:
-
--   LLM routing.
--   Fallback handling.
--   Caching.
-
-These components help manage external model dependencies and provide
-additional reliability mechanisms around LLM requests.
-
-------------------------------------------------------------------------
-
-## Authentication
-
-The FastAPI backend uses Clerk/JWT authentication for protected
-operations.
-
-``` text
-Client
-  |
-  v
-Authentication
-  |
-  v
-JWT Validation
-  |
-  v
-FastAPI
-  |
-  v
-RAG Workflow
-  |
-  v
-Response
-```
-
-------------------------------------------------------------------------
-
-## Observability
-
-Kub-Bot uses two complementary observability systems:
-
-  Tool        Purpose
-  ----------- ---------------------------------------
-  LangSmith   LangChain/LangGraph tracing
-  Logfire     Application and FastAPI observability
-
-This provides visibility into both application execution and AI workflow
-behaviour.
-
-------------------------------------------------------------------------
-
-## Evaluation
-
-Kub-Bot includes a separate RAGAS evaluation workflow covering retrieval
-and generation quality.
-
-  Metric                 Score
-  -------------------- -------
-  Faithfulness            0.98
-  Answer Relevancy        0.59
-  Context Precision       0.72
-  Context Recall          0.83
-  Answer Correctness      0.51
-
-> **Evaluation note:** These values are from a specific local evaluation
-> run and should not be interpreted as permanent system-wide accuracy.
-
-The evaluation helps distinguish issues related to retrieval, context
-selection, grounding, relevance, and answer generation.
-
-------------------------------------------------------------------------
 
 ## Technology Stack
 
-  Category             Technologies
-  -------------------- ----------------------------
-  Language             Python 3.11.9
-  Backend              FastAPI, Uvicorn, Pydantic
-  Workflow             LangChain, LangGraph
+  Area                 Technologies
+  -------------------- ------------------------------------
+  Backend              Python, FastAPI, Uvicorn, Pydantic
+  Orchestration        LangChain, LangGraph
   Embeddings           Gemini Embeddings
   Vector Database      Qdrant
   Reranking            Jina Reranker
   LLM Infrastructure   Portkey
   Guardrails           NVIDIA NeMo Guardrails
-  Authentication       Clerk / JWT
-  Frontend             Streamlit
+  Authentication       Clerk, JWT
+  Interface            Streamlit
   Observability        LangSmith, Logfire
   Evaluation           RAGAS
   Deployment           Docker, Render
-
-------------------------------------------------------------------------
 
 ## Project Structure
 
 ``` text
 Kubernetes-RAG-ChatBot/
-│
-├── app/                  # FastAPI backend and RAG application
-├── evals/                # RAG evaluation workflow
+├── app/                  # FastAPI and RAG application
+├── evals/                # RAGAS evaluation
 ├── DATA/                 # Knowledge-base data
 ├── ui/                   # Streamlit interface
-│   ├── app.py
-│   ├── Logo.png
-│   └── bg.png
-│
 ├── .streamlit/           # Streamlit configuration
 ├── Dockerfile
 ├── requirements.txt
@@ -306,203 +113,69 @@ Kubernetes-RAG-ChatBot/
 └── .gitignore
 ```
 
-*The structure above highlights the main project directories and files;
-the actual repository may contain additional modules and configuration
-files.*
+## Run Locally
 
-------------------------------------------------------------------------
-
-## Getting Started
-
-### Prerequisites
-
--   Python 3.11.
--   Git.
--   A Qdrant instance.
--   Required LLM and embedding credentials.
--   Jina API credentials.
--   Clerk configuration.
--   Portkey configuration.
--   LangSmith and/or Logfire credentials if observability is enabled.
-
-### 1. Clone the Repository
+**Requirements:** Python 3.11, Git, Qdrant, and credentials for the
+configured model and supporting services.
 
 ``` bash
+# Clone the repository
 git clone https://github.com/TanviPatidar481/Kubernetes-RAG-ChatBot.git
 cd Kubernetes-RAG-ChatBot
-```
 
-### 2. Create a Virtual Environment
-
-**Windows (PowerShell):**
-
-``` powershell
+# Create and activate a virtual environment
 python -m venv .venv
-.venv\Scripts\Activate.ps1
-```
 
-**Linux / macOS:**
+# Windows
+.venv\Scripts\activate
 
-``` bash
-python -m venv .venv
+# macOS / Linux
 source .venv/bin/activate
-```
 
-### 3. Install Dependencies
-
-``` bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-### 4. Configure Environment Variables
-
-Configure the credentials required by the application for the relevant
-services:
-
--   LLM and embedding provider.
--   Qdrant.
--   Jina.
--   Portkey.
--   Clerk.
--   LangSmith.
--   Logfire.
-
-Use the environment variable names expected by the application
-configuration.
-
-> **Security:** Never commit API keys, JWT secrets, database
-> credentials, or other sensitive values to the repository. Store
-> secrets in environment variables or an appropriate secrets manager.
-
-### 5. Start the FastAPI Backend
-
-``` bash
+# Start the API
 uvicorn app.main:app --reload
 ```
 
-API documentation:
-
-<http://127.0.0.1:8000/docs>
-
-### 6. Start the Streamlit Interface
+Run the Streamlit interface in a separate terminal:
 
 ``` bash
 streamlit run ui/app.py
 ```
 
-------------------------------------------------------------------------
+API documentation: <http://127.0.0.1:8000/docs>
 
-## Engineering Challenges
+Configure the environment variables required by the application before
+starting the services. Never commit API keys, JWT secrets, or other
+credentials.
 
-### Reranking Memory Usage
+## Engineering Notes
 
-A local Sentence Transformer reranking approach introduced significant
-memory requirements during development.
+-   **Reranking memory:** Local Sentence Transformer-based reranking
+    increased memory requirements. The deployed workflow uses the hosted
+    Jina Reranker API.
+-   **Guardrails overhead:** Local testing showed memory usage
+    increasing from approximately 301 MB to 574 MB, with an HTTP peak
+    near 595 MB.
+-   **Independent observability failures:** The `/query` endpoint could
+    return successfully while LangSmith tracing encountered a `401`
+    authentication error.
 
-FlashRank was investigated as a lightweight alternative, while the
-deployed application uses the hosted Jina Reranker API.
+## Future Work
 
-### NeMo Guardrails Memory Overhead
-
-During local testing, adding NeMo Guardrails increased observed memory
-usage approximately from:
-
-``` text
-~301 MB → ~574 MB
-```
-
-with an HTTP peak of approximately:
-
-``` text
-~595 MB
-```
-
-This highlighted the resource considerations involved in deploying
-multi-component AI applications.
-
-### Observability Authentication
-
-During development, the `/query` API could successfully return a
-response while LangSmith tracing produced a `401` authentication error.
-
-This demonstrated that application execution and observability
-integrations can fail independently.
-
-------------------------------------------------------------------------
-
-## Future Improvements
-
--   Hybrid retrieval combining dense and sparse search.
--   Improved query routing and query transformation.
--   Better handling of long conversations and conversation
-    summarization.
+-   Hybrid dense and sparse retrieval.
+-   Improved query routing and long-conversation handling.
 -   Streaming responses.
--   Expanded automated evaluation and regression testing.
--   Deployment resource optimization.
--   Additional failure-recovery and retry strategies.
+-   Expanded evaluation and regression testing.
+-   Resource optimization and stronger failure recovery.
 
-------------------------------------------------------------------------
+## Deployment
 
-## Live Deployment
+-   **API:**
+    [kubernetes-rag-chatbot.onrender.com](https://kubernetes-rag-chatbot.onrender.com/)
+-   **UI:** [kub-bot-ui.onrender.com](https://kub-bot-ui.onrender.com/)
 
-  -----------------------------------------------------------------------------------
-  Component                           URL
-  ----------------------------------- -----------------------------------------------
-  Backend API                         <https://kubernetes-rag-chatbot.onrender.com>
-
-  Web Interface                       <https://kub-bot-ui.onrender.com>
-  -----------------------------------------------------------------------------------
-
-Deployment availability depends on the current hosting environment and
-configured external services.
-
-------------------------------------------------------------------------
-
-## Author
-
-**Tanvi Patidar**\
-B.Tech --- Computer Science & Engineering\
-Medi-Caps University, Indore
-
--   **GitHub:** [TanviPatidar481](https://github.com/TanviPatidar481)
--   **Project Repository:**
-    [Kubernetes-RAG-ChatBot](https://github.com/TanviPatidar481/Kubernetes-RAG-ChatBot)
-
-------------------------------------------------------------------------
-
-## Project Summary
-
-Kub-Bot demonstrates the engineering of a multi-component RAG
-application combining:
-
-``` text
-FastAPI
-   +
-LangGraph
-   +
-Qdrant
-   +
-Gemini Embeddings
-   +
-Jina Reranker
-   +
-Portkey
-   +
-NeMo Guardrails
-   +
-Clerk / JWT
-   +
-LangSmith / Logfire
-   +
-RAGAS
-   +
-Streamlit
-```
-
-The project focuses on retrieval quality, reranking, stateful workflow
-orchestration, conversational context, controlled LLM interactions,
-authentication, observability, evaluation, and deployment.
-
-By combining these components into a single application, Kub-Bot
-provides an implementation of an end-to-end, domain-specific Agentic RAG
-assistant.
+Availability depends on the hosting environment and external service
+configuration.
