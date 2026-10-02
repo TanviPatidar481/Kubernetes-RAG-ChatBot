@@ -1,4 +1,4 @@
-# Kub-Bot — Enterprise Agentic RAG Assistant
+# Kub-Bot — Agentic RAG Assistant
 
 > An advanced Retrieval-Augmented Generation (RAG) application built with FastAPI, LangGraph, Qdrant, Gemini Embeddings, Jina Reranker, NeMo Guardrails, and Portkey.
 
